@@ -50,16 +50,131 @@ module.exports = function setupBot(bot, db) {
     [{ text: "MALUMOT" }],
     [{ text: "🪙 Tangani ko‘rish" }],
     [{ text: "💸 Tangani pulga aylantirish" }],
+    [{ text: "💸 Tanga sotib olish" }],
+    [{ text: "🔙 Orqaga" }],
+  ];
+
+  const VAZIFA_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "➕ Kanalga topshiriq qo‘shish" }],
+    [{ text: "🎯 Obuna bo‘lib tanga ishlash" }],
+    [{ text: "📝 Vazifalar ro'yxati" }],
+    [{ text: "🔙 Orqaga" }],
+  ];
+
+  const OYIN_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "🎮 O'yin o'ynab tanga ishlash" }],
+    [{ text: "🎁 Bonus olish" }],
+    [{ text: "🔙 Orqaga" }],
+  ];
+
+  const PROFIL_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "🤝 Do‘st taklif qilish" }],
+    [{ text: "🧮 Statistika" }],
+    [{ text: "👤 Mening sahifam" }],
+    [{ text: "🔙 Orqaga" }],
+    // [{ text: "🏴‍☠️ Orol jangiga kirish" }],
+    // [{ text: "🎲 Zar tashlash" }],
   ];
 
   const GAMES_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "🎯 Sirli kod o'yini" }],
     [{ text: "🎲 Omadli raqam o'yini" }],
     [{ text: "🎰 Slot o'yini" }],
     [{ text: "💥 Mina qidirish" }],
     [{ text: "🔙 Orqaga" }],
   ];
 
+  const ISHCHILAR_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "🛒 Ishchi sotib olish" }],
+    [{ text: "👷‍♂️ Mening ishchilarim" }],
+    [{ text: "💼 Ishchilarni sotish" }],
+    [{ text: "💰 Daromadni yig‘ish" }],
+    [{ text: "🔙 Orqaga" }],
+  ];
+
+  const FUTBOLCHILAR_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "⚽ Mening futbolchilarim" }],
+    [{ text: "🆕 Yangi futbolchi ochish" }],
+    [{ text: "📊 Statistika" }],
+    [{ text: "🔙 Orqaga" }],
+  ];
+
   const USERS_PER_PAGE = 10;
+
+  const REF_BONUS = 600; // taklif qilgan odamga beriladigan tanga
+
+  const slotEmojis = ["⚽️", "🏀", "🎱", "🥎", "🎲", "🐓", "🐏"];
+
+  const COIN_TO_CASH_RATE = 0.1;
+
+  const QOLDIQ_BULINSIN = 10;
+
+  const SECRETGAMEATTEMPS = 6;
+
+  const OPENPACKPRICE = 250;
+
+  // Mukofot konfiguratsiyasi (index = to‘g‘ri topilgan raqamlar soni)
+  const REWARDS_SECRET_CODE_GAME = [0, 5, 15, 40, 100];
+  // 0 ta to‘g‘ri => 0 tanga, 1 ta to‘g‘ri => 5 tanga, va hokazo
+
+  const DUELGAMEPRICE = 10; // Duel o‘yinining narxi
+
+  const MAX_DUELS_PER_DAY = 10; // 1 kunda bir foydalanuvchi bilan maksimal duel soni
+  const INITIAL_REWARD = 100; // boshlang'ich tanga mukofoti
+  const DECAY_AMOUNT = 10; // har safar o'ynaganda mukofot kamayishi
+
+  const VoiceTopshiriqID =
+    "AwACAgIAAxkBAAJBxGia7W1QH8SLEMr07ZmloP_rKrrsAALadAACqtTYSK_frWn29sxzNgQ";
+  const VoiceIshchilarID =
+    "AwACAgIAAxkBAAJES2ibCJmM_qTknmtbmzSOTkp_hBajAALZdgACqtTYSDukfCxZ8NBqNgQ";
+  const FutbolchilarBulimiID =
+    "AwACAgIAAxkBAAKm4micnpPJYX6L-xTmBnXDFlogu1CKAAJfeQACFtzpSL0UEVVemeF9NgQ";
+  const InteractivVoiceId =
+    "AwACAgIAAxkBAAEBBIdonuBmXCXQXi_7mPwrgPNxp2MvSQACdXgAApru-Ujx_BvRgsA7tTYE";
+  const DuelVoiceID =
+    "AwACAgIAAxkBAAEBBK9onuD2pgxXkeVEOqiLnKzXvIBtLQACfngAApru-UhqM1RBIhI6eTYE";
+
+  // setInterval(async () => {
+  //   const now = new Date();
+  //   const games = await db("pirate_games").where({ status: "playing" });
+
+  //   console.log(`Tekshirilmoqda ${games.length} o'yin...`);
+
+  //   for (const game of games) {
+  //     const lastMove = new Date(game.last_move_at);
+  //     const diffSeconds = (now - lastMove) / 1000;
+
+  //     if (diffSeconds > 20) {
+  //       // 20 sekund javobsiz
+  //       let winnerId;
+  //       if (game.turn === 1) winnerId = game.player2_id;
+  //       else winnerId = game.player1_id;
+
+  //       await db("pirate_games")
+  //         .where({ id: game.id })
+  //         .update({ status: "finished" });
+
+  //       bot.telegram.sendMessage(
+  //         winnerId,
+  //         "🏆 <b>Raqib javob bermadi, sizga avtomatik g‘alaba!</b>",
+  //         {
+  //           parse_mode: "HTML",
+  //         }
+  //       );
+  //       bot.telegram.sendMessage(
+  //         winnerId === game.player1_id ? game.player2_id : game.player1_id,
+  //         "😢 <i>Siz vaqtida javob bermadingiz, o‘yin tugadi.</i>",
+  //         { parse_mode: "HTML" }
+  //       );
+  //     }
+  //   }
+  // }, 7000); // har 1 soniyada tekshiradi
 
   async function sendUsersPage(ctx) {
     const page = ctx.session.userPage || 0;
