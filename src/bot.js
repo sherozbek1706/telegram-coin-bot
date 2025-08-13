@@ -2,21 +2,53 @@ const { Markup } = require("telegraf");
 const { adminOnly } = require("./middlewares/adminOnly");
 const { DateTime } = require("luxon"); // vaqt bilan ishlash uchun
 const ADMIN_ID = process.env.ADMIN_ID;
+const xlsx = require("xlsx");
+const checkPhone = require("./middlewares/checkPhone");
+const { keyboard } = require("telegraf/markup");
+const checktasks = require("./middlewares/checktasks");
+const checkGroupMember = require("./middlewares/checkGroupMember");
+const onlyPrivate = require("./middlewares/onlyPrivate");
+const setupOpenPack = require("./models/setupOpenPack");
+const userPlayers = require("./models/userPlayers");
+const statisticsUserPlayers = require("./models/statisticsUserPlayers");
+const {
+  checkLevelAndOpenPack,
+} = require("./middlewares/checkLevelandOpenPack");
+const setupSellAllWorkers = require("./models/setupSellAllWorkers");
+const allPlayerFootbalCareerStats = require("./models/allPlayerFootbalCareerStats");
+const { jsPDF } = require("jspdf"); // pdf yaratish uchun
+const fs = require("fs");
+const path = require("path");
 
 module.exports = function setupBot(bot, db) {
   const MAIN_KEYBOARD = [
-    [{ text: "🪙 Tangani ko‘rish" }, { text: "➕ Kanalga topshiriq qo‘shish" }],
-    [{ text: "🎮 O'yin o'ynab tanga ishlash" }],
-    [
-      { text: "🎯 Obuna bo‘lib tanga ishlash" },
-      { text: "📝 Vazifalar ro'yxati" },
-      { text: "🧮 Statistika" },
-    ],
-    [
-      { text: "💸 Tanga sotib olish" },
-      { text: "🎁 Bonus olish" },
-      { text: "👤 Mening sahifam" },
-    ],
+    [{ text: "MALUMOT" }],
+    [{ text: "📱 Interaktiv o'yinlar bo'limi" }],
+    [{ text: "⚽ Futbolchilar bo'limi" }],
+    [{ text: "👨‍🔧 Ishchilar bo‘limi" }],
+    [{ text: "💰 Tanga bo‘limi" }],
+    [{ text: "🎮 O‘yinlar bo‘limi" }],
+    [{ text: "📋 Vazifalar bo‘limi" }],
+    [{ text: "👤 Profil" }],
+  ];
+
+  const INTERACTIVE_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "🏴‍☠️ Orol o'yiniga kirish" }],
+    [{ text: "⚽ Duelga kirish" }],
+    [{ text: "🔙 Orqaga" }],
+  ];
+
+  const DUEL_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "🏴‍☠️ Orol jangiga kirish" }],
+    [{ text: "🎲 Zar tashlash" }],
+    [{ text: "🔙 Orqaga" }],
+  ];
+
+  const TANGA_KEYBOARD = [
+    [{ text: "MALUMOT" }],
+    [{ text: "🪙 Tangani ko‘rish" }],
     [{ text: "💸 Tangani pulga aylantirish" }],
   ];
 
