@@ -551,9 +551,16 @@ module.exports = function setupBot(bot, db) {
   });
 
   bot.start(async (ctx) => {
+    const args = ctx.message.text.split(" ");
     const telegram_id = ctx.from.id;
     const username = ctx.from.username || null;
-    const first_name = ctx.from.first_name || null;
+    const first_name = ctx.from.first_name || ctx.from.last_name || null;
+
+    let referredBy = null;
+    if (args[1] && args[1].startsWith("ref")) {
+      referredBy = parseInt(args[1].substring(3), 10);
+      if (referredBy === telegram_id) referredBy = null; // o'zini o'zi taklif qilmasin
+    }
 
     try {
       // Foydalanuvchi allaqachon mavjudmi?
@@ -569,10 +576,36 @@ module.exports = function setupBot(bot, db) {
           telegram_id,
           username,
           first_name,
-          coins: 0,
+          coins: 100,
+          referred_by: referredBy,
         });
+
+        if (referredBy) {
+          await db("users")
+            .where("telegram_id", referredBy)
+            .increment("coins", REF_BONUS)
+            .increment("invited_count", 1);
+
+          try {
+            const inviter = await db("users")
+              .where("telegram_id", referredBy)
+              .first();
+
+            await ctx.telegram.sendMessage(
+              referredBy,
+              `🎉 Yangi do‘st taklif qildingiz!\n💰 +${REF_BONUS} tanga.\n👥 Jami takliflar: ${
+                inviter.invited_count + 1
+              }`
+            );
+          } catch (err) {
+            console.log("Xabar yuborishda xatolik:", err.message);
+          }
+        }
+
         await ctx.reply(
-          `👋 Salom, ${first_name || "foydalanuvchi"}! Botga xush kelibsiz.`
+          `👋 Salom, ${
+            first_name || "foydalanuvchi"
+          }! Botga xush kelibsiz. Siz botga yangi bo'lganligiz uchun 💰 100 ta tanga berildi. Tangalar bu pul tegani!`
         );
 
         const message = `🆕 Yangi foydalanuvchi qo‘shildi:\n\n🆔 ID: ${telegram_id}\n👤 @${
@@ -581,6 +614,19 @@ module.exports = function setupBot(bot, db) {
 
         await ctx.telegram.sendMessage(+ADMIN_ID, message);
       }
+
+      await ctx.reply(
+        `👋 <b>Xush kelibsiz!</b>\n
+Bu bot orqali siz quyidagi imkoniyatlarga ega bo‘lasiz:\n
+💠 <b>Kanal obunachilarini oshirish</b> — Faol va haqiqiy obunachilarni tezda jalb qiling.
+🎯 <b>Qiziqarli o‘yinlar</b> — O‘yinlarni o‘ynang, tangalar yutib oling va ularni pulga aylantiring.
+⏳ <b>Har soat bonus</b> — Har soatda bepul tangalar oling.
+💰 <b>Tangalardan daromad</b> — Tangalaringizni pulga aylantirib, hisobingizni to‘ldiring.
+🎮 <b>Ko‘ngilochar va foydali</b> — O‘ynab ham, daromad qilib ham zavqlaning 😄
+📌 Boshlash uchun pastdagi tugmalardan foydalaning va imkoniyatlarni sinab ko‘ring!
+`,
+        { parse_mode: "HTML" }
+      );
 
       // Asosiy menyu
       await ctx.reply("👇 Asosiy menyu:", {
@@ -596,8 +642,14 @@ module.exports = function setupBot(bot, db) {
     }
   });
 
-  bot.command("myid", (ctx) => {
-    ctx.reply(`Sizning Telegram ID: ${ctx.from.id}`);
+  bot.use(checkPhone(db));
+
+  bot.use(checkGroupMember);
+
+  bot.use(onlyPrivate);
+
+  bot.command("myid", async (ctx) => {
+    await ctx.reply(`Sizning Telegram ID: ${ctx.from.id}`);
   });
 
   bot.command("addcoins", async (ctx) => {
