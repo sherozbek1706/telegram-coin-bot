@@ -180,7 +180,15 @@ module.exports = function setupBot(bot, db) {
     const page = ctx.session.userPage || 0;
 
     const users = await db("users")
-      .select("id", "telegram_id", "username", "coins", "created_at")
+      .select(
+        "id",
+        "telegram_id",
+        "username",
+        "first_name",
+        "coins",
+        "phone_number",
+        "created_at"
+      )
       .orderBy("created_at", "desc")
       .offset(page * USERS_PER_PAGE)
       .limit(USERS_PER_PAGE);
@@ -198,7 +206,10 @@ module.exports = function setupBot(bot, db) {
       message += `${page * USERS_PER_PAGE + index + 1}. 🆔 ${
         user.telegram_id
       }\n`;
-      message += `👤 @${user.username || "yo'q"}\n`;
+      message += user.username
+        ? `👤 @${user.username || "yo'q"}\n`
+        : `👤 ${user.first_name || "yo'q"}\n`;
+      message += `📱 +${user.phone_number || "-"}\n`;
       message += `💰 Tanga: ${user.coins}\n`;
       message += `📅 ${new Date(user.created_at).toLocaleString()}\n\n`;
     });
@@ -292,6 +303,7 @@ module.exports = function setupBot(bot, db) {
   }
 
   async function omadliRaqamUyini(ctx) {
+    console.log("Omadli raqam o'yini boshlanmoqda...");
     const userId = ctx.from.id;
     const user = await getUser(userId); // Ma'lumotlar bazasidan tanga olish funksiyasi
 
@@ -300,7 +312,7 @@ module.exports = function setupBot(bot, db) {
     }
 
     // 5 tanga olib tashlaymiz
-    await updateUserCoins(userId, -1);
+    await updateUserCoins(userId, -5);
 
     // Bot random son o'ylaydi va sessionda saqlaydi
     const botNumber = Math.floor(Math.random() * 10) + 1;
@@ -323,12 +335,138 @@ module.exports = function setupBot(bot, db) {
     );
   }
 
+  async function sendNewUsersPage(ctx) {
+    const page = ctx.session.newUserPage || 0;
+
+    // Hozirgi kunning boshlanishi
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    // Ertangi kunning boshlanishi
+    const startOfTomorrow = new Date(startOfDay);
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+    const users = await db("users")
+      .select(
+        "id",
+        "telegram_id",
+        "username",
+        "first_name",
+        "phone_number",
+        "coins",
+        "created_at"
+      )
+      .whereBetween("created_at", [startOfDay, startOfTomorrow])
+      .orderBy("created_at", "desc")
+      .offset(page * USERS_PER_PAGE)
+      .limit(USERS_PER_PAGE);
+
+    const totalUsers = await db("users")
+      .whereBetween("created_at", [startOfDay, startOfTomorrow])
+      .count("id")
+      .first();
+    const totalCount = parseInt(totalUsers.count || totalUsers["count"]);
+
+    if (users.length === 0) {
+      return ctx.reply("👥 Bugun foydalanuvchilar qo‘shilmadi.");
+    }
+
+    let message = `👥 Bugun qo‘shilgan foydalanuvchilar (sahifa ${
+      page + 1
+    }):\n\n`;
+
+    users.forEach((user, index) => {
+      message += `${page * USERS_PER_PAGE + index + 1}. 🆔 ${
+        user.telegram_id
+      }\n`;
+      message += user.username
+        ? `👤 @${user.username || "yo'q"}\n`
+        : `👤 ${user.first_name || "yo'q"}\n`;
+      message += `📱 +${user.phone_number || "-"}\n`;
+      message += `💰 Tanga: ${user.coins}\n`;
+      message += `📅 ${new Date(user.created_at).toLocaleString()}\n\n`;
+    });
+
+    const hasPrev = page > 0;
+    const hasNext = (page + 1) * USERS_PER_PAGE < totalCount;
+
+    const buttons = [];
+    if (hasPrev)
+      buttons.push({ text: "⬅️ Oldingi", callback_data: "prev_newusers" });
+    if (hasNext)
+      buttons.push({ text: "➡️ Keyingi", callback_data: "next_newusers" });
+
+    return ctx.reply(message.slice(0, 4000), {
+      reply_markup: {
+        inline_keyboard: [buttons],
+      },
+    });
+  }
+
   // Inline tugma keyboard (1–6)
   function getMinesKeyboard() {
     return Markup.inlineKeyboard([
       [1, 2, 3].map((n) => Markup.button.callback(`${n}`, `mines_${n}`)),
       [4, 5, 6].map((n) => Markup.button.callback(`${n}`, `mines_${n}`)),
     ]);
+  }
+
+  let getUserDetail = (user) => {
+    if (user.username) {
+      return `👤 @${user.username}`;
+    } else if (user.first_name) {
+      return `👤 ${user.first_name}`;
+    } else {
+      return `👤 ${user.telegram_id}`;
+    }
+  };
+
+  async function canPlayDuel(player1, player2) {
+    // Har ikki IDni tartiblab saqlash (shunda kim p1/p2 farq qilmaydi)
+    const [idA, idB] = [Math.min(player1, player2), Math.max(player1, player2)];
+
+    const record = await db("duel_history")
+      .where({ player1_id: idA, player2_id: idB })
+      .first();
+
+    if (!record) {
+      // Yangi juftlik – ruxsat
+      await db("duel_history").insert({
+        player1_id: idA,
+        player2_id: idB,
+        duel_count: 0,
+      });
+      return { canPlay: true, count: 0 };
+    }
+
+    // Agar 1 kundan oshgan bo'lsa, count reset qilinadi
+    const diffHours =
+      (new Date() - new Date(record.first_played_at)) / (1000 * 60 * 60);
+
+    if (diffHours >= 24) {
+      await db("duel_history")
+        .where({ player1_id: idA, player2_id: idB })
+        .update({
+          duel_count: 0,
+          first_played_at: db.fn.now(),
+        });
+      return { canPlay: true, count: 0 };
+    }
+
+    // Limit tekshirish
+    if (record.duel_count >= MAX_DUELS_PER_DAY) {
+      return { canPlay: false, count: record.duel_count };
+    }
+
+    return { canPlay: true, count: record.duel_count };
+  }
+
+  async function updateDuelHistory(player1, player2) {
+    const [idA, idB] = [Math.min(player1, player2), Math.max(player1, player2)];
+    await db("duel_history")
+      .where({ player1_id: idA, player2_id: idB })
+      .increment("duel_count", 1)
+      .update({ last_played_at: db.fn.now() });
   }
 
   bot.start(async (ctx) => {
