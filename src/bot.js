@@ -469,6 +469,87 @@ module.exports = function setupBot(bot, db) {
       .update({ last_played_at: db.fn.now() });
   }
 
+  function calculateReward(count) {
+    // count – oldingi o‘yinlar soni
+    const reward = INITIAL_REWARD - count * DECAY_AMOUNT;
+    return reward > 0 ? reward : 1; // minimal 1 tanga
+  }
+
+  async function startDuel(ctx, player1, player2, reward, duelId) {
+    const p1 = await db("users").where({ telegram_id: player1 }).first();
+    const p2 = await db("users").where({ telegram_id: player2 }).first();
+
+    if (!p1 || !p2) return;
+
+    const p1Strength = Math.floor(Math.random() * 50) + 50;
+    const p2Strength = Math.floor(Math.random() * 50) + 50;
+
+    let winner, loser, reason;
+    if (p1Strength > p2Strength) {
+      winner = p1;
+      loser = p2;
+      reason = `${getUserDetail(winner)} kuchi ${p1Strength}, ${getUserDetail(
+        loser
+      )} kuchi ${p2Strength} dan yuqori bo‘lgani uchun g‘alaba qozondi.`;
+    } else if (p2Strength > p1Strength) {
+      winner = p2;
+      loser = p1;
+      reason = `${getUserDetail(winner)} kuchi ${p2Strength}, ${getUserDetail(
+        loser
+      )} kuchi ${p1Strength} dan yuqori bo‘lgani uchun g‘alaba qozondi.`;
+    } else {
+      // Durrang bo‘lsa ham statusni finished qilamiz, winner_id null bo‘ladi
+      await db("duels").where({ id: duelId }).update({
+        status: "finished",
+        winner_id: null,
+      });
+      return ctx.reply("🤝 Durrang bo‘ldi.");
+    }
+
+    await db("users")
+      .where({ telegram_id: winner.telegram_id })
+      .increment("coins", reward);
+
+    // 🗄 Duel holatini yangilash
+    await db("duels").where({ id: duelId }).update({
+      status: "finished",
+      winner_id: winner.telegram_id,
+    });
+
+    bot.telegram.sendMessage(
+      winner.telegram_id,
+      `🎉 G‘alaba! (+${reward} tanga)\n📊 Sabab: ${reason}`
+    );
+    bot.telegram.sendMessage(
+      loser.telegram_id,
+      `❌ Mag‘lubiyat.\n📊 Sabab: ${reason}`
+    );
+  }
+
+  bot.on("contact", async (ctx) => {
+    try {
+      const phone = ctx.message.contact.phone_number;
+      console.log(ctx.message.contact);
+
+      await db("users")
+        .where({ telegram_id: ctx.from.id })
+        .update({ phone_number: phone });
+
+      await ctx.reply(
+        "✅ Raqamingiz saqlandi. Endi botdan foydalanishingiz mumkin!",
+        {
+          reply_markup: {
+            keyboard: MAIN_KEYBOARD,
+            resize_keyboard: true,
+            one_time_keyboard: true,
+          },
+        }
+      );
+    } catch (error) {
+      console.error("Raqam saqlashda xatolik:", error);
+    }
+  });
+
   bot.start(async (ctx) => {
     const telegram_id = ctx.from.id;
     const username = ctx.from.username || null;
