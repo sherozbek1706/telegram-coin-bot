@@ -1097,6 +1097,68 @@ Bu bot orqali siz quyidagi imkoniyatlarga ega bo‘lasiz:\n
     );
   });
 
+  bot.command("buy_worker", async (ctx) => {
+    const id = Number(ctx.message.text.split(" ")[1]);
+    const worker = await db("workers").where({ id }).first();
+    if (!worker) return ctx.reply("❌ Ishchi topilmadi");
+
+    const user = await db("users").where({ telegram_id: ctx.from.id }).first();
+    if (user.coins < worker.price) return ctx.reply("❌ Tangangiz yetmaydi");
+
+    // pulni ayiramiz
+    await db("users")
+      .where({ telegram_id: ctx.from.id })
+      .update({ coins: user.coins - worker.price });
+
+    // ishchini qo‘shamiz yoki quantity +1 qilamiz
+    const existing = await db("user_workers")
+      .where({ user_id: ctx.from.id, worker_id: id })
+      .first();
+
+    if (existing) {
+      await db("user_workers")
+        .where({ id: existing.id })
+        .update({ quantity: existing.quantity + 1 });
+    } else {
+      await db("user_workers").insert({
+        user_id: ctx.from.id,
+        worker_id: id,
+        quantity: 1,
+      });
+    }
+
+    ctx.reply(`✅ ${worker.name} ishchisi qo‘shildi!`);
+  });
+
+  bot.command("all_user_workers", async (ctx) => {
+    if (ctx.from.id !== Number(ADMIN_ID)) {
+      return ctx.reply("⛔ Siz admin emassiz.");
+    }
+
+    const usersWorkers = await db("user_workers")
+      .select(
+        "user_id",
+        db.raw("COUNT(DISTINCT worker_id) as worker_types"),
+        db.raw("SUM(quantity) as total_workers")
+      )
+      .groupBy("user_id")
+      .orderBy("total_workers", "desc"); // ko‘p ishlidan kamigacha
+
+    if (!usersWorkers.length) {
+      return ctx.reply("🚫 Hozircha hech bir foydalanuvchida ishchilar yo‘q.");
+    }
+
+    let text = "<b>📊 Foydalanuvchilar va ishchilar soni:</b>\n\n";
+
+    usersWorkers.forEach((u, index) => {
+      text += `#${index + 1} 👤 <b>${u.user_id}</b>\n`;
+      text += `🔹 Ishchi turlari: <b>${u.worker_types} ta</b>\n`;
+      text += `📦 Umumiy soni: <b>${u.total_workers} ta</b>\n\n`;
+    });
+
+    await ctx.reply(text, { parse_mode: "HTML" });
+  });
+
   bot.action("next_tasks", async (ctx) => {
     ctx.session.taskPage = (ctx.session.taskPage || 0) + 1;
     await ctx.answerCbQuery();
@@ -1119,6 +1181,25 @@ Bu bot orqali siz quyidagi imkoniyatlarga ega bo‘lasiz:\n
       },
     });
   });
+
+  // Pagination tugmalari
+  bot.action(
+    "prev_newusers",
+    adminOnly(async (ctx) => {
+      ctx.session.newUserPage = Math.max((ctx.session.newUserPage || 0) - 1, 0);
+      await ctx.answerCbQuery();
+      await sendNewUsersPage(ctx);
+    })
+  );
+
+  bot.action(
+    "next_newusers",
+    adminOnly(async (ctx) => {
+      ctx.session.newUserPage = (ctx.session.newUserPage || 0) + 1;
+      await ctx.answerCbQuery();
+      await sendNewUsersPage(ctx);
+    })
+  );
 
   bot.action(
     ["prev_users", "next_users"],
@@ -1223,9 +1304,13 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
 
     if (game.tries >= 3) {
       ctx.session.minesweeper = null;
-      return ctx.editMessageText(
+
+      await ctx.editMessageText(
         `✅ Siz 3 ta to‘g‘ri tanlov qildingiz! 🎉\n💰 Sizga 30 tanga qo‘shildi.`
       );
+
+      // Stiker yuborish
+      await ctx.reply("🎉");
     }
 
     await ctx.answerCbQuery(`✅ Toza! ${3 - game.tries} urinish qoldi.`);
