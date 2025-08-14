@@ -140,42 +140,6 @@ module.exports = function setupBot(bot, db) {
   const DuelVoiceID =
     "AwACAgIAAxkBAAEBBK9onuD2pgxXkeVEOqiLnKzXvIBtLQACfngAApru-UhqM1RBIhI6eTYE";
 
-  // setInterval(async () => {
-  //   const now = new Date();
-  //   const games = await db("pirate_games").where({ status: "playing" });
-
-  //   console.log(`Tekshirilmoqda ${games.length} o'yin...`);
-
-  //   for (const game of games) {
-  //     const lastMove = new Date(game.last_move_at);
-  //     const diffSeconds = (now - lastMove) / 1000;
-
-  //     if (diffSeconds > 20) {
-  //       // 20 sekund javobsiz
-  //       let winnerId;
-  //       if (game.turn === 1) winnerId = game.player2_id;
-  //       else winnerId = game.player1_id;
-
-  //       await db("pirate_games")
-  //         .where({ id: game.id })
-  //         .update({ status: "finished" });
-
-  //       bot.telegram.sendMessage(
-  //         winnerId,
-  //         "🏆 <b>Raqib javob bermadi, sizga avtomatik g‘alaba!</b>",
-  //         {
-  //           parse_mode: "HTML",
-  //         }
-  //       );
-  //       bot.telegram.sendMessage(
-  //         winnerId === game.player1_id ? game.player2_id : game.player1_id,
-  //         "😢 <i>Siz vaqtida javob bermadingiz, o‘yin tugadi.</i>",
-  //         { parse_mode: "HTML" }
-  //       );
-  //     }
-  //   }
-  // }, 7000); // har 1 soniyada tekshiradi
-
   async function sendUsersPage(ctx) {
     const page = ctx.session.userPage || 0;
 
@@ -1159,6 +1123,12 @@ Bu bot orqali siz quyidagi imkoniyatlarga ega bo‘lasiz:\n
     await ctx.reply(text, { parse_mode: "HTML" });
   });
 
+  /**
+   *
+   * ACTION
+   *
+   */
+
   bot.action("next_tasks", async (ctx) => {
     ctx.session.taskPage = (ctx.session.taskPage || 0) + 1;
     await ctx.answerCbQuery();
@@ -1373,7 +1343,6 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
    *  HEARS
    *
    */
-
 
   const voice1 =
     "AwACAgIAAxkBAAEBCGxonxiTBPK839dh8IfG_9pY_s4RGQACX3cAAp94-EgVbjtNGYS5wTYE";
@@ -1821,6 +1790,237 @@ UMUMIY REAL PULDA - <b>${(
         "👤 Siz duel kutish ro‘yxatiga qo‘shildingiz. Raqib kelsa o‘yin boshlanadi."
       );
     }
+  });
+
+  bot.hears(
+    "💰 Daromadni yig‘ish",
+    checkLevelAndOpenPack(bot, db),
+    async (ctx) => {
+      const userWorkers = await db("user_workers")
+        .where({ user_id: ctx.from.id })
+        .join("workers", "user_workers.worker_id", "workers.id")
+        .select(
+          "user_workers.*",
+          "workers.name",
+          "workers.coins_per_hour",
+          "workers.id as worker_id"
+        );
+
+      if (!userWorkers.length) return ctx.reply("❌ Sizda ishchi yo‘q");
+
+      // Bir xil ishchilarni guruhlab olish
+      const grouped = Object.values(
+        userWorkers.reduce((acc, uw) => {
+          if (!acc[uw.worker_id]) {
+            acc[uw.worker_id] = {
+              ...uw,
+              quantity: 0,
+              ids: [],
+            };
+          }
+          acc[uw.worker_id].quantity += uw.quantity;
+          acc[uw.worker_id].ids.push(uw.id);
+          return acc;
+        }, {})
+      );
+
+      let total = 0;
+      const now = new Date();
+      let details = "<b>📋 Ishchi daromadlari:</b>\n\n";
+
+      for (const uw of grouped) {
+        const diffMs = now - new Date(uw.last_collected);
+        let diffHours = diffMs / 3600000;
+
+        // ❗ Faqat 30 daqiqagacha hisoblaymiz
+        diffHours = Math.min(diffHours, 0.5);
+
+        const coinsEarned = Math.floor(
+          uw.coins_per_hour * uw.quantity * diffHours
+        );
+
+        if (coinsEarned > 0) {
+          total += coinsEarned;
+
+          details += `👷‍♂️ <b>${uw.name}</b> × ${
+            uw.quantity
+          } — 🕒 ${diffHours.toFixed(
+            1
+          )} soat — 💰 <b>${coinsEarned}</b> tanga\n`;
+
+          // Har bir ID bo‘yicha last_collected yangilash
+          await db("user_workers")
+            .whereIn("id", uw.ids)
+            .update({ last_collected: now });
+        }
+      }
+
+      if (total > 0) {
+        const user = await db("users")
+          .where({ telegram_id: ctx.from.id })
+          .first();
+
+        await db("users")
+          .where({ telegram_id: ctx.from.id })
+          .update({ coins: user.coins + total });
+
+        await ctx.replyWithHTML(
+          `💰 <b>Siz jami ${total} tanga yig‘ib oldingiz!</b>\n\n${details}`
+        );
+      } else {
+        ctx.reply("⏳ Hali yangi daromad yo‘q");
+      }
+    }
+  );
+
+  bot.hears(
+    "👷‍♂️ Mening ishchilarim",
+    checkLevelAndOpenPack(bot, db),
+    async (ctx) => {
+      const userId = ctx.from.id;
+
+      // Foydalanuvchi ishchilarini olish (bir xil ishchilarni jamlash)
+      const myWorkers = await db("user_workers")
+        .join("workers", "user_workers.worker_id", "workers.id")
+        .select(
+          "workers.name",
+          "workers.coins_per_hour",
+          db.raw("SUM(user_workers.quantity) as total_quantity"),
+          db.raw("MAX(user_workers.last_collected) as last_collected")
+        )
+        .where("user_workers.user_id", userId)
+        .groupBy("workers.name", "workers.coins_per_hour");
+
+      if (!myWorkers.length) {
+        return ctx.reply("🚫 Sizda hozircha ishchilar yo‘q.");
+      }
+
+      let text = "<b>👷‍♂️ Mening ishchilarim:</b>\n\n";
+
+      myWorkers.forEach((w, index) => {
+        text += `#${index + 1} <b>${w.name}</b>\n`;
+        text += `📦 Soni: <b>${w.total_quantity} ta</b>\n`;
+        text += `💰 Daromad: <i>${
+          w.coins_per_hour * w.total_quantity
+        } tanga/soat</i>\n`;
+        text += `⏳ Oxirgi yig‘ish: <i>${new Date(
+          w.last_collected
+        ).toLocaleString()}</i>\n\n`;
+      });
+
+      await ctx.reply(text, { parse_mode: "HTML" });
+    }
+  );
+
+  bot.hears("💰 Tanga bo‘limi", async (ctx) => {
+    await ctx.reply("💰 Tanga bo‘limi", {
+      reply_markup: { keyboard: TANGA_KEYBOARD, resize_keyboard: true },
+    });
+  });
+
+  // 📋 Vazifalar bo‘limi
+  bot.hears("📋 Vazifalar bo‘limi", async (ctx) => {
+    await ctx.reply("📋 Vazifalar bo‘limi", {
+      reply_markup: { keyboard: VAZIFA_KEYBOARD, resize_keyboard: true },
+    });
+  });
+
+  // 📋 ISHCHILAR bo‘limi
+  bot.hears(
+    "👨‍🔧 Ishchilar bo‘limi",
+    // checkLevelAndOpenPack(bot, db),
+    async (ctx) => {
+      // Elon matni
+      const elonMatn = `
+📢 <b>Ishchilar bo‘limiga xush kelibsiz!</b>
+
+👷‍♂️ Ishchilarni olish — bu sizning avtomatik pul ishlashingizga yordam beradi.
+💨 Qancha ko‘p ishchi olsangiz, shuncha tez tanga yig‘asiz.
+⏳ Ishchilar faqat 30 daqiqa ishlashadi, undan keyin siz tangalarni yig‘ib olmaguningizcha ishlashmaydi.
+  `;
+
+      await ctx.replyWithHTML(elonMatn);
+
+      // Klaviatura chiqarish
+      await ctx.reply("👨‍🔧 Ishchilar bo‘limi", {
+        reply_markup: { keyboard: ISHCHILAR_KEYBOARD, resize_keyboard: true },
+      });
+
+      // Ovozli xabar
+      await ctx.replyWithVoice(VoiceIshchilarID);
+    }
+  );
+
+  // 📋 ISHCHILAR bo‘limi
+  bot.hears("⚽ Futbolchilar bo'limi", async (ctx) => {
+    const elonMatn = `
+📢 <b>⚽ Futbolchilar bo'limiga xush kelibsiz!</b>
+
+Hozirda bitta futbolchi sotib olish narxi ${OPENPACKPRICE} tanga.
+Futbolchilarni sotib olib, o'yinlarda ishtirok etishingiz mumkin.
+  `;
+
+    await ctx.replyWithHTML(elonMatn);
+
+    // Klaviatura chiqarish
+    await ctx.reply("⚽ Futbolchilar bo'limi", {
+      reply_markup: { keyboard: FUTBOLCHILAR_KEYBOARD, resize_keyboard: true },
+    });
+
+    // Ovozli xabar
+    await ctx.replyWithVoice(FutbolchilarBulimiID);
+  });
+
+  bot.hears("📱 Interaktiv o'yinlar bo'limi", async (ctx) => {
+    //     const elonMatn = `
+    // 📢 <b>⚽ Futbolchilar bo'limiga xush kelibsiz!</b>
+
+    // Hozirda bitta futbolchi sotib olish narxi ${OPENPACKPRICE} tanga.
+    // Futbolchilarni sotib olib, o'yinlarda ishtirok etishingiz mumkin.
+    //   `;
+
+    //     await ctx.replyWithHTML(elonMatn);
+
+    // Klaviatura chiqarish
+    await ctx.reply("📱 Interaktiv o'yinlar bo'limi", {
+      reply_markup: { keyboard: INTERACTIVE_KEYBOARD, resize_keyboard: true },
+    });
+
+    // Ovozli xabar
+    await ctx.replyWithVoice(InteractivVoiceId);
+  });
+
+  bot.hears("🏴‍☠️ Orol o'yiniga kirish", async (ctx) => {
+    //     const elonMatn = `
+    // 📢 <b>⚽ Futbolchilar bo'limiga xush kelibsiz!</b>
+
+    // Hozirda bitta futbolchi sotib olish narxi ${OPENPACKPRICE} tanga.
+    // Futbolchilarni sotib olib, o'yinlarda ishtirok etishingiz mumkin.
+    //   `;
+
+    //     await ctx.replyWithHTML(elonMatn);
+
+    // Klaviatura chiqarish
+    await ctx.reply("🏴‍☠️ Orol o'yiniga kirish", {
+      reply_markup: { keyboard: DUEL_KEYBOARD, resize_keyboard: true },
+    });
+
+    // Ovozli xabar
+    await ctx.replyWithVoice(DuelVoiceID);
+  });
+
+  // 🎮 O‘yinlar bo‘limi
+  bot.hears("🎮 O‘yinlar bo‘limi", checktasks(db), async (ctx) => {
+    await ctx.reply("🎮 O‘yinlar bo‘limi", {
+      reply_markup: { keyboard: OYIN_KEYBOARD, resize_keyboard: true },
+    });
+  });
+
+  // 👤 Profil bo‘limi
+  bot.hears("👤 Profil", async (ctx) => {
+    await ctx.reply("👤 Profil bo‘limi", {
+      reply_markup: { keyboard: PROFIL_KEYBOARD, resize_keyboard: true },
+    });
   });
 
   bot.hears("🪙 Tangani ko‘rish", async (ctx) => {
