@@ -856,9 +856,8 @@ Bu bot orqali siz quyidagi imkoniyatlarga ega bo‘lasiz:\n
 
       ctx.reply(replyText, { parse_mode: "HTML" });
     } catch (error) {
-      console.error("Broadcast xatolik:", error);
-      ctx.reply("❌ Xabar yuborishda xatolik yuz berdi.");
       console.error("Cleanup xatolik:", error);
+      ctx.reply("❌ Foydalanuvchilarni tozalashda xatolik yuz berdi.");
     }
   });
 
@@ -960,6 +959,13 @@ Bu bot orqali siz quyidagi imkoniyatlarga ega bo‘lasiz:\n
           `🔹 /users — Barcha foydalanuvchilar ro‘yxati\n` +
           `🔹 /broadcast — Hammaga xabar yuborish\n` +
           `🔹 /tasks — Barcha topshiriqlar\n` +
+          `🔹 /all_user_workers — Barcha ishchiga ega foydalanuvchilar\n` +
+          `🔹 /newusers — Yangi Foydalanuvchilarni ko'rish\n` +
+          `🔹 /cleanup — Botni bloklagan userlarni tozalab tashlash\n` +
+          `🔹 /send_message_user — Foydalanuvchilarga xabar yuborish\n` +
+          `🔹 /leaderboard — Kuchli foydalanuvchilarni ko'rish\n` +
+          `🔹 /all_players_stats — Foydalanuvchilarning fudbolchilarini ko'rish\n` +
+          `🔹 /users_parse_to_excel - Foydalanuvchilarni excelga o'tkazish\n` +
           `🔹 /withdraws — Pul yechish so‘rovlarini ko‘rish\n\n` +
           `❗️ Diqqat: Barcha komandalar faqat sizga ko‘rinadi.`,
         { parse_mode: "HTML" }
@@ -986,6 +992,109 @@ Bu bot orqali siz quyidagi imkoniyatlarga ega bo‘lasiz:\n
 
     ctx.session.taskPage = 0;
     return showTasksPage(ctx, 0);
+  });
+
+  bot.on("voice", (ctx) => {
+    console.log("Voice file ID:", ctx.message.voice.file_id);
+  });
+
+  bot.command("leaderboard", async (ctx) => {
+    if (ctx.from.id.toString() !== ADMIN_ID) {
+      return ctx.reply("⛔ Bu komandani faqat admin ko‘ra oladi.");
+    }
+
+    try {
+      // 1️⃣ Tangalar bo‘yicha TOP 10
+      const topCoins = await db("users")
+        .select(
+          "telegram_id",
+          "username",
+          "first_name",
+          "phone_number",
+          "coins"
+        )
+        .orderBy("coins", "desc")
+        .limit(10);
+
+      // 2️⃣ Taklif bo‘yicha TOP 10
+      const topReferrals = await db("users")
+        .select(
+          "telegram_id",
+          "username",
+          "first_name",
+          "phone_number",
+          "invited_count"
+        )
+        .orderBy("invited_count", "desc")
+        .limit(10);
+
+      let msg = `<b>🏆 Leaderboard</b>\n\n`;
+      msg += `💰 <b>Tangalar bo‘yicha TOP 10:</b>\n`;
+      topCoins.forEach((u, i) => {
+        msg += `${i + 1}. <b>${
+          u.username || u.phone_number
+            ? `+${u.phone_number}`
+            : u.first_name || u.phone_number || u.telegram_id
+        }</b> — ${u.coins} tanga\n`;
+      });
+
+      msg += `\n👥 <b>Taklif bo‘yicha TOP 10:</b>\n`;
+      topReferrals.forEach((u, i) => {
+        msg += `${i + 1}. <b>${
+          u.phone_number
+            ? `+${u.phone_number}`
+            : u.first_name || u.phone_number || u.telegram_id
+        }</b>— ${u.invited_count} do‘st\n`;
+      });
+
+      await ctx.reply(msg, { parse_mode: "HTML" });
+    } catch (error) {
+      console.error(error);
+      ctx.reply("❌ Leaderboard olishda xatolik bo‘ldi.");
+    }
+  });
+
+  bot.command(
+    "newusers",
+    adminOnly(async (ctx) => {
+      ctx.session.newUserPage = 0;
+      await sendNewUsersPage(ctx);
+    })
+  );
+
+  bot.command("send_message_user", async (ctx) => {
+    if (+ctx.from.id !== +ADMIN_ID) return ctx.reply("Siz admin emassiz!");
+
+    ctx.session.state = "waiting_for_user";
+    ctx.reply("Foydalanuvchi ID yoki username kiriting:");
+  });
+
+  // Foydalanuvchi referral statistikasini ko‘rish
+  bot.command("my_referrals", async (ctx) => {
+    const user = await db("users").where("telegram_id", ctx.from.id).first();
+    if (!user) return ctx.reply("Siz ro‘yxatdan o‘tmagansiz.");
+
+    ctx.reply(
+      `📊 Referral statistikasi:\n` +
+        `👥 Taklif qilingan do‘stlar: ${user.invited_count}\n` +
+        `💰 Hozirgi tangalar: ${user.coins}`
+    );
+  });
+
+  bot.command("add_worker", async (ctx) => {
+    if (ctx.from.id != ADMIN_ID) return;
+
+    const [name, coinsPerHour, price] = ctx.message.text.split(" ").slice(1);
+
+    await db("workers").insert({
+      name,
+      coins_per_hour: Number(coinsPerHour),
+      price: Number(price),
+    });
+
+    ctx.reply(
+      `✅ Ishchi qo‘shildi: ${name} (${coinsPerHour} tanga/soat, narx: ${price})`
+    );
   });
 
   bot.action("next_tasks", async (ctx) => {
