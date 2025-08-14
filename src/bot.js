@@ -714,40 +714,151 @@ Bu bot orqali siz quyidagi imkoniyatlarga ega bo‘lasiz:\n
   });
 
   bot.command("broadcast", async (ctx) => {
-    const senderId = ctx.from.id;
-
-    if (senderId !== +ADMIN_ID) {
+    if (ctx.from.id !== +ADMIN_ID) {
       return ctx.reply("⛔ Siz admin emassiz.");
     }
 
-    const message = ctx.message.text.split(" ").slice(1).join(" ");
+    ctx.session.awaitingBroadcast = true;
+    ctx.reply(
+      "📢 Yuboriladigan xabarni kiriting (rasm, matn, video, knopka — hammasi bo‘lishi mumkin):"
+    );
+  });
 
-    if (!message) {
-      return ctx.reply(
-        "❌ Xabar matnini yozing.\nMasalan:\n/broadcast Hammaga salom!"
-      );
+  bot.command("users_parse_to_excel", async (ctx) => {
+    if (ctx.from.id !== +ADMIN_ID) {
+      return ctx.reply("⛔ Siz admin emassiz.");
     }
 
     try {
-      const users = await db("users").select("telegram_id");
+      const users = await db("users").select(
+        "telegram_id",
+        "username",
+        "first_name",
+        "phone_number",
+        "coins",
+        "created_at"
+      );
 
-      let success = 0;
-      let failed = 0;
-
-      for (const user of users) {
-        try {
-          await bot.telegram.sendMessage(user.telegram_id, message);
-          success++;
-        } catch (err) {
-          failed++;
-          console.error(`❌ [${user.telegram_id}] ga yuborilmadi`);
-        }
+      if (users.length === 0) {
+        return ctx.reply("👥 Foydalanuvchilar topilmadi.");
       }
 
-      ctx.reply(`✅ Yuborildi: ${success} ta\n❌ Xatolik: ${failed} ta`);
+      const rows = users.map((user) => [
+        user.telegram_id,
+        user.username ? `https://t.me/${user.username}` : "yo‘q",
+        user.first_name || "yo‘q",
+        user.phone_number || "yo‘q",
+        user.coins,
+        new Date(user.created_at).toLocaleString(),
+      ]);
+
+      const header = [
+        "Telegram ID",
+        "Username",
+        "First Name",
+        "Phone Number",
+        "Coins",
+        "Created At",
+      ];
+      rows.unshift(header);
+
+      const xlsx = require("xlsx");
+      const ws = xlsx.utils.aoa_to_sheet(rows);
+
+      // 📌 Ustunlarga filter qo‘yish
+      ws["!autofilter"] = {
+        ref: `A1:F${rows.length}`, // Filter qamrovi
+      };
+
+      // 📌 Har bir ustun kengligini kattaroq qilish
+      ws["!cols"] = [
+        { wch: 15 }, // Telegram ID
+        { wch: 40 }, // Username
+        { wch: 25 }, // First Name
+        { wch: 25 }, // Phone Number
+        { wch: 10 }, // Coins
+        { wch: 25 }, // Created At
+      ];
+
+      const wb = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(wb, ws, "Users");
+
+      const { DateTime } = require("luxon");
+      const filePath = `./users_${DateTime.now().toFormat(
+        "yyyyMMdd_HHmmss"
+      )}.xlsx`;
+      xlsx.writeFile(wb, filePath);
+
+      await ctx.replyWithDocument({ source: filePath });
+    } catch (error) {
+      console.error("Xatolik:", error);
+      ctx.reply(
+        "❌ Foydalanuvchilarni Excel faylga saqlashda xatolik yuz berdi."
+      );
+    }
+  });
+
+  bot.command("cleanup", async (ctx) => {
+    if (ctx.from.id !== +ADMIN_ID) {
+      return ctx.reply("⛔ Siz admin emassiz.");
+    }
+
+    try {
+      const users = await db("users").select(
+        "telegram_id",
+        "username",
+        "first_name"
+      );
+      let deletedUsers = [];
+
+      const BATCH_SIZE = 20;
+      for (let i = 0; i < users.length; i += BATCH_SIZE) {
+        const batch = users.slice(i, i + BATCH_SIZE);
+
+        await Promise.all(
+          batch.map(async (user) => {
+            try {
+              await bot.telegram.sendChatAction(user.telegram_id, "typing");
+            } catch (err) {
+              if (
+                err.response &&
+                err.response.error_code === 403 &&
+                err.response.description.includes("bot was blocked")
+              ) {
+                deletedUsers.push({
+                  id: user.telegram_id,
+                  username: user.username || "username yo‘q",
+                  name: user.first_name || "ism yo‘q",
+                });
+
+                await db("users").where("telegram_id", user.telegram_id).del();
+                console.log(`🗑 ${user.telegram_id} o‘chirildi (bloklagan).`);
+              }
+            }
+          })
+        );
+
+        await new Promise((res) => setTimeout(res, 500));
+      }
+
+      if (deletedUsers.length === 0) {
+        return ctx.reply("✅ Hech kim bloklamagan.");
+      }
+
+      let replyText = `🗑 <b>O‘chirilgan foydalanuvchilar</b> (${deletedUsers.length} ta):\n`;
+      replyText += deletedUsers
+        .map((u, i) => {
+          return `${i + 1}. <b>${u.name}</b> (${
+            u.username ? "@" + u.username : "—"
+          }) <code>[${u.id}]</code>`;
+        })
+        .join("\n");
+
+      ctx.reply(replyText, { parse_mode: "HTML" });
     } catch (error) {
       console.error("Broadcast xatolik:", error);
       ctx.reply("❌ Xabar yuborishda xatolik yuz berdi.");
+      console.error("Cleanup xatolik:", error);
     }
   });
 
