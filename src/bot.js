@@ -1521,6 +1521,308 @@ UMUMIY REAL PULDA - <b>${(
     return next();
   });
 
+  bot.hears("🏴‍☠️ Orol jangiga kirish", async (ctx) => {
+    const userId = ctx.from.id;
+
+    // Foydalanuvchi allaqachon playing bo'lsa
+    const activeGame = await db("pirate_games")
+      .where(function () {
+        this.where({ player1_id: userId }).orWhere({ player2_id: userId });
+      })
+      .andWhere("status", "playing")
+      .first();
+
+    if (activeGame) {
+      return ctx.reply(
+        "❌ Siz hozir o‘yin ichidasiz, yangi o‘yin ocholmaysiz.",
+        { parse_mode: "HTML" }
+      );
+    }
+
+    // Foydalanuvchi allaqachon waiting bo'lsa
+    const waitingGame = await db("pirate_games")
+      .where(function () {
+        this.where({ player1_id: userId }).orWhere({ player2_id: userId });
+      })
+      .andWhere("status", "waiting")
+      .first();
+
+    if (waitingGame) {
+      return ctx.reply("⏳ Siz allaqachon raqib qidiryapsiz.", {
+        parse_mode: "HTML",
+      });
+    }
+
+    // Raqib qidirish
+    let opponentGame = await db("pirate_games")
+      .whereNull("player2_id")
+      .andWhere("player1_id", "!=", userId)
+      .andWhere("status", "waiting")
+      .first();
+
+    if (opponentGame) {
+      // Raqib topildi — o‘yin boshlaymiz
+      await db("pirate_games")
+        .where({ id: opponentGame.id })
+        .update({
+          player2_id: userId,
+          status: "playing",
+          positions: JSON.stringify({ p1: 0, p2: 0 }),
+          coins: JSON.stringify({ p1: 100, p2: 100 }),
+          turn: 1, // 1-o‘yinchi boshlaydi
+          round: 0, // boshlang‘ich raund
+        });
+
+      ctx.reply(
+        "<b>🎮 O‘yin boshlandi!</b>\nSiz <b>2-o‘yinchisiz</b>.\nNavbat 1-o‘yinchida.",
+        { parse_mode: "HTML" }
+      );
+      bot.telegram.sendMessage(
+        opponentGame.player1_id,
+        "<b>🎮 O‘yin boshlandi!</b>\nSiz <b>1-o‘yinchisiz</b>.\nNavbat sizda!",
+        { parse_mode: "HTML" }
+      );
+    } else {
+      // Yangi o‘yin ochish
+      await db("pirate_games").insert({
+        player1_id: userId,
+        status: "waiting",
+        positions: JSON.stringify({ p1: 0, p2: 0 }),
+        coins: JSON.stringify({ p1: 100, p2: 100 }),
+      });
+      ctx.reply("👤 <b>O‘yin kutish ro‘yxatiga qo‘shildingiz.</b>", {
+        parse_mode: "HTML",
+      });
+    }
+  });
+
+  // O‘yin holatini tekshirish
+  bot.hears("🎲 Zar tashlash", async (ctx) => {
+    const userId = ctx.from.id;
+
+    const game = await db("pirate_games")
+      .where(function () {
+        this.where({ player1_id: userId }).orWhere({ player2_id: userId });
+      })
+      .andWhere({ status: "playing" })
+      .first();
+
+    if (!game) return ctx.reply("❌ Sizda faol o‘yin yo‘q.");
+
+    const turnUserId =
+      game.turn === 1 ? Number(game.player1_id) : Number(game.player2_id);
+
+    if (turnUserId !== Number(userId)) {
+      return ctx.reply("⏳ Navbatingizni kuting!");
+    }
+
+    // Zar tashlash
+    const roll = Math.floor(Math.random() * 6) + 1;
+
+    let positions =
+      typeof game.positions === "string"
+        ? JSON.parse(game.positions)
+        : game.positions;
+
+    let coins =
+      typeof game.coins === "string" ? JSON.parse(game.coins) : game.coins;
+
+    const playerKey = game.turn === 1 ? "p1" : "p2";
+    const opponentKey = playerKey === "p1" ? "p2" : "p1";
+    positions[playerKey] = (positions[playerKey] + roll) % 6; // 6 ta joy
+
+    // Xarita hodisasi
+    const tile = await db("pirate_map")
+      .where({ id: positions[playerKey] + 1 })
+      .first();
+
+    let eventMsg = "";
+    if (tile.type === "storm") {
+      eventMsg = `${tile.description} 🌪`;
+    } else {
+      coins[playerKey] += tile.value;
+      eventMsg = `${tile.description} (${tile.value > 0 ? "+" : ""}${
+        tile.value
+      } tanga)`;
+    }
+
+    // Yangilash
+    await db("pirate_games")
+      .where({ id: game.id })
+      .update({
+        positions: JSON.stringify(positions),
+        coins: JSON.stringify(coins),
+        turn: game.turn === 1 ? 2 : 1, // navbat almashtirish
+        round: game.round + 1,
+        last_move_at: db.fn.now(), // shu yerda yangilanadi
+      });
+
+    const rollerId = userId;
+    const opponentId =
+      rollerId === Number(game.player1_id)
+        ? Number(game.player2_id)
+        : Number(game.player1_id);
+
+    // Zar tashlagan odam uchun xabar
+    const statusMsgSelf = `
+<b>🎲 Zar tashlandi!</b>
+<blockquote>📦 Sizga <b>${roll}</b> tushdi</blockquote>
+<b>📍 Sizning pozitsiyangiz:</b> ${positions[playerKey] + 1} / 6
+<b>📍 Raqibingiz pozitsiyasi:</b> ${positions[opponentKey] + 1} / 6
+
+<b>💰 Sizda:</b> ${coins[playerKey]} tanga
+<b>💰 Raqibingizda:</b> ${coins[opponentKey]} tanga
+
+<b>🗺 Hodisa:</b> ${eventMsg}
+
+⏳ <i>Navbat raqibingizda</i>
+`;
+
+    // Raqib uchun xabar
+    const statusMsgOpponent = `
+<b>🎲 Raqib zar tashladi!</b>
+<blockquote>📦 ${roll} tushdi</blockquote>
+<b>📍 Sizning pozitsiyangiz:</b> ${positions[opponentKey] + 1} / 6
+<b>📍 Raqibingiz pozitsiyasi:</b> ${positions[playerKey] + 1} / 6
+
+<b>💰 Sizda:</b> ${coins[opponentKey]} tanga
+<b>💰 Raqibingizda:</b> ${coins[playerKey]} tanga
+
+<b>🗺 Hodisa:</b> ${eventMsg}
+
+✅ <i>Navbat sizda!</i>
+`;
+
+    await bot.telegram.sendMessage(rollerId, statusMsgSelf, {
+      parse_mode: "HTML",
+    });
+    await bot.telegram.sendMessage(opponentId, statusMsgOpponent, {
+      parse_mode: "HTML",
+    });
+
+    // O‘yin tugashini tekshirish
+    if (game.round + 1 >= 10) {
+      let winner;
+      if (coins.p1 > coins.p2) winner = game.player1_id;
+      else if (coins.p2 > coins.p1) winner = game.player2_id;
+
+      await db("pirate_games").where({ id: game.id }).update({
+        status: "finished",
+      });
+
+      if (winner) {
+        bot.telegram.sendMessage(winner, "🏆 <b>G‘alaba sizga!</b>", {
+          parse_mode: "HTML",
+        });
+        bot.telegram.sendMessage(
+          winner === game.player1_id ? game.player2_id : game.player1_id,
+          "😢 <i>Siz yutqazdingiz.</i>",
+          { parse_mode: "HTML" }
+        );
+      } else {
+        bot.telegram.sendMessage(game.player1_id, "🤝 <b>Durrang!</b>", {
+          parse_mode: "HTML",
+        });
+        bot.telegram.sendMessage(game.player2_id, "🤝 <b>Durrang!</b>", {
+          parse_mode: "HTML",
+        });
+      }
+    }
+  });
+
+  bot.hears(
+    "🛒 Ishchi sotib olish",
+    checkLevelAndOpenPack(bot, db),
+    async (ctx) => {
+      const workers = await db("workers").select("*");
+
+      if (!workers.length) {
+        return ctx.reply("🚫 Hozircha ishchilar mavjud emas.");
+      }
+
+      let text = "<b>💼 Mavjud ishchilar:</b>\n\n";
+
+      const buttons = workers.map((w) => {
+        text += `🔹 <b>${w.name}</b>\n`;
+        text += `💰 <i>${w.coins_per_hour} tanga/soat</i>\n`;
+        text += `🏷 Narx: <b>${w.price} tanga</b>\n\n`;
+        return [
+          {
+            text: `🛒 Sotib olish – ${w.name}`,
+            callback_data: `buy_worker_${w.id}`,
+          },
+        ];
+      });
+
+      ctx.reply(text, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: buttons,
+        },
+      });
+    }
+  );
+
+  bot.hears("⚽ Duelga kirish", async (ctx) => {
+    const userId = ctx.from.id;
+
+    const alreadyWaiting = await db("duels")
+      .where({ player1_id: userId, status: "waiting" })
+      .first();
+    if (alreadyWaiting) {
+      return ctx.reply("⏳ Siz allaqachon duel kutyapsiz.");
+    }
+
+    // 🔍 Bloklangan raqibni o'tkazib yuborish
+    let opponent = await db("duels")
+      .whereNull("player2_id")
+      .andWhere("player1_id", "!=", userId)
+      .andWhere("status", "waiting")
+      .first();
+
+    let check;
+    while (opponent) {
+      check = await canPlayDuel(userId, opponent.player1_id);
+      if (check.canPlay) break; // ✅ O‘ynash mumkin bo‘lsa, to‘xtaymiz
+
+      const opponentUser = await db("users")
+        .where({ telegram_id: opponent.player1_id })
+        .first();
+
+      // ❌ O‘ynash mumkin emas — shuni xabar qilamiz
+      await ctx.reply(
+        `⚠️ ${getUserDetail(
+          opponentUser
+        )} foydalanuvchi bilan allaqachon juda ko‘p duel o‘ynagansiz, limit tugagan.`
+      );
+
+      // Keyingi kutayotgan raqibni qidiramiz
+      opponent = await db("duels")
+        .whereNull("player2_id")
+        .andWhere("player1_id", "!=", userId)
+        .andWhere("status", "waiting")
+        .andWhere("player1_id", "!=", opponent.player1_id)
+        .first();
+    }
+
+    if (opponent && check?.canPlay) {
+      // Duelni boshlash
+      await db("duels")
+        .where({ id: opponent.id })
+        .update({ player2_id: userId, status: "playing" });
+
+      await updateDuelHistory(userId, opponent.player1_id);
+
+      const reward = calculateReward(check.count);
+      await startDuel(ctx, opponent.player1_id, userId, reward, opponent.id);
+    } else if (!opponent) {
+      await db("duels").insert({ player1_id: userId });
+      ctx.reply(
+        "👤 Siz duel kutish ro‘yxatiga qo‘shildingiz. Raqib kelsa o‘yin boshlanadi."
+      );
+    }
+  });
+
   bot.hears("🪙 Tangani ko‘rish", async (ctx) => {
     const telegram_id = ctx.from.id;
 
