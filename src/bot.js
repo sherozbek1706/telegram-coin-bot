@@ -1283,6 +1283,7 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
     const userId = ctx.from.id;
     const data = ctx.match[0]; // mines_1, mines_2, ...
     const choice = parseInt(data.split("_")[1]);
+    console.log(`Mina o‘yini tanlandi: ${userId}`);
 
     const game = ctx.session.minesweeper;
     if (!game || game.selected.includes(choice)) {
@@ -1352,6 +1353,172 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
         ],
       },
     });
+  });
+
+  /**
+   *
+   * SETUPS
+   *
+   *
+   */
+
+  setupOpenPack(bot, db);
+  userPlayers(bot, db);
+  statisticsUserPlayers(bot, db);
+  setupSellAllWorkers(bot, db);
+  allPlayerFootbalCareerStats(bot, db);
+
+  /**
+   *
+   *  HEARS
+   *
+   */
+
+
+  const voice1 =
+    "AwACAgIAAxkBAAEBCGxonxiTBPK839dh8IfG_9pY_s4RGQACX3cAAp94-EgVbjtNGYS5wTYE";
+  const voice2 =
+    "AwACAgIAAxkBAAEBCG1onxjP-xbQZ35EwDMJ2T5v0qQ5hgACYncAAp94-EhFr3f6vPtvzDYE";
+  const voice3 =
+    "AwACAgIAAxkBAAEBCG5onxkyXWo_p6uyZW79Hx14PmthfwACZ3cAAp94-Ei6gCSZ27q3LTYE";
+  const voice4 =
+    "AwACAgIAAxkBAAEBCG9onxl73ELnEv446ose36kYwyuhGwACaXcAAp94-Eh4FKvq4kXy-DYE";
+  const voice5 =
+    "AwACAgIAAxkBAAEBCXVonykAAbc77FFOiP210xsPOzCa7wADbHgAAp94-EiEWXSxdfFzHjYE";
+
+  bot.hears("MALUMOT", async (ctx) => {
+    const tg = ctx.from;
+    await ctx.reply(
+      "🛑🛑🛑🛑🛑🛑🛑🛑BARCHASINI ESHITISHINGIZNI SO`RAYMAN, ENDI TANGA ISHLASHINGIZ BEFOYDA."
+    );
+    await ctx.replyWithVoice(voice1);
+    await ctx.replyWithVoice(voice2);
+    await ctx.replyWithVoice(voice3);
+    await ctx.replyWithVoice(voice4);
+    await ctx.replyWithVoice(voice5);
+
+    let user = await db("users").where({ telegram_id: tg.id }).first();
+
+    if (!user) {
+      await db("users").insert({
+        telegram_id: tg.id,
+        username: tg.username || null,
+        first_name: tg.first_name || null,
+        coins: 0,
+      });
+      user = await db("users").where({ telegram_id: tg.id }).first();
+    }
+
+    // Futbolchilar
+    const footballersData = await db("user_players")
+      .where({ user_id: user.telegram_id })
+      .sum("quantity as total_quantity")
+      .first();
+
+    const totalPlayers = Number(footballersData.total_quantity) || 0;
+    const footballersValue = totalPlayers * 260;
+
+    // Ishchilar
+    const workersList = await db("user_workers")
+      .where({ user_id: user.telegram_id })
+      .join("workers", "user_workers.worker_id", "workers.id")
+      .select("workers.name", "workers.price")
+      .sum("user_workers.quantity as total_quantity")
+      .groupBy("workers.id", "workers.name", "workers.price");
+
+    let totalWorkers = 0;
+    let totalWorkersValue = 0;
+    let workersText = "";
+
+    for (const w of workersList) {
+      const totalPrice = w.price * +w.total_quantity;
+      totalWorkers += +w.total_quantity;
+      totalWorkersValue += totalPrice;
+
+      workersText += `\n ${w.name} — ${
+        w.total_quantity
+      } ta × ${w.price.toLocaleString()} so'm = ${totalPrice.toLocaleString()} ta tanga`;
+    }
+
+    const totalWealth = user.coins + footballersValue + totalWorkersValue;
+
+    const msg = `
+Profil ma'lumoti
+ID: ${user.telegram_id}
+Ism: ${user.first_name || "—"}
+Username: ${user.username ? "@" + user.username : "—"}
+
+Tangalar: ${user.coins.toLocaleString()} ta tanga
+
+Futbolchilar:
+— Soni: ${totalPlayers} ta
+— Narxi: 260 ta tanga
+— Umumiy qiymati: ${footballersValue.toLocaleString()} ta tanga
+
+Ishchilar:
+— Soni: ${totalWorkers} ta
+— Umumiy qiymati: ${totalWorkersValue.toLocaleString()} ta tanga
+${workersText}
+
+Jami boylik: ${totalWealth.toLocaleString()} ta tanga
+
+
+UMUMIY REAL PULDA - <b>${(
+      totalWealth * COIN_TO_CASH_RATE
+    ).toLocaleString()}</b> SO'M TASHLAB BERISHIM KERAK
+  `.trim();
+
+    await ctx.reply(msg, {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "✅ Barchasiga roziman", callback_data: "accept_all" }],
+          [
+            {
+              text: "💬 Guruhga yozib barchasini bilib olish",
+              url: "https://t.me/obunachimmisiz_chat",
+            },
+          ],
+        ],
+      },
+    });
+  });
+
+  // PDF yaratish va yuborish
+  bot.on("callback_query", async (ctx, next) => {
+    if (ctx.callbackQuery.data === "accept_all") {
+      const tg = ctx.from;
+      const user = await db("users").where({ telegram_id: tg.id }).first();
+
+      // PDF yaratish
+      const doc = new jsPDF();
+      doc.setFontSize(14);
+      doc.text("Profil ma'lumoti", 10, 10);
+      doc.setFontSize(10);
+      doc.text(`ID: ${user.telegram_id}`, 10, 20);
+      doc.text(`Ism: ${user.first_name || "—"}`, 10, 30);
+      doc.text(`Username: ${user.username || "—"}`, 10, 40);
+      doc.text(`Tangalar: ${user.coins}`, 10, 50);
+      doc.text("Qo'shimcha ma'lumotlar:", 10, 60);
+      doc.text(ctx.callbackQuery.message.text, 10, 70);
+
+      // Saqlash
+      const filePath = path.join(__dirname, `profile_${tg.id}.pdf`);
+      doc.save(filePath);
+
+      // Foydalanuvchiga yuborish
+      await ctx.telegram.sendDocument(tg.id, { source: filePath });
+
+      // Adminga yuborish
+      await ctx.telegram.sendDocument(ADMIN_ID, { source: filePath });
+
+      // Faylni vaqtinchalik o‘chirish
+      fs.unlinkSync(filePath);
+
+      await ctx.answerCbQuery("✅ PDF tayyor va yuborildi!");
+    }
+
+    return next();
   });
 
   bot.hears("🪙 Tangani ko‘rish", async (ctx) => {
