@@ -2605,6 +2605,33 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
         { parse_mode: "HTML" }
       );
 
+      // 🔚 Urinishlar tugasa — mukofot beramiz
+      if (ctx.session.attempts >= SECRETGAMEATTEMPS) {
+        if (rewardCoins > 0) {
+          await db("users")
+            .where({ telegram_id: ctx.from.id })
+            .increment("coins", rewardCoins);
+
+          const user = await db("users")
+            .where({ telegram_id: ctx.from.id })
+            .first();
+
+          ctx.reply(
+            `❌ <b>Afsus</b>, siz kodni to‘liq topa olmadingiz.\nSirli kod: <code>${ctx.session.secretCode}</code>\n💰 Eng yaxshi natijangiz uchun <b>${rewardCoins} tanga</b> qo‘shildi!\nJami tangangiz: <b>${user.coins}</b>`,
+            { parse_mode: "HTML" }
+          );
+        } else {
+          ctx.reply(
+            `❌ <b>Afsus</b>, siz kodni topolmadingiz.\nSirli kod: <code>${ctx.session.secretCode}</code>\n💸 Sizga tanga berilmadi.`,
+            { parse_mode: "HTML" }
+          );
+        }
+
+        ctx.session.secretCode = null;
+        ctx.session.attempts = 0;
+      }
+    }
+
     if (!step) return;
 
     if (step === "awaiting_channel") {
@@ -2694,6 +2721,48 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
       return ctx.reply(
         "✅ Topshiriq muvaffaqiyatli qo‘shildi! Endi boshqa foydalanuvchilar uni bajarishadi."
       );
+    }
+
+    if (step === "guessing_lucky_number") {
+      const userId = telegram_id;
+
+      const guess = parseInt(text);
+
+      if (isNaN(guess) || guess < 1 || guess > 10) {
+        return ctx.reply("❗ Iltimos, 1 dan 10 gacha butun son kiriting.");
+      }
+
+      const botNumber = ctx.session.botNumber;
+      const diff = Math.abs(botNumber - guess);
+
+      let reward = 0;
+
+      if (guess === botNumber) {
+        reward = 50;
+        await updateUserCoins(userId, reward);
+        await ctx.reply(
+          `🎉 Zo'r! To'g'ri topdingiz: ${botNumber}\n💰 Sizga ${reward} tanga qo‘shildi!`
+        );
+      } else {
+        reward = diff;
+        await updateUserCoins(userId, reward);
+        await ctx.reply(
+          `😅 Men ${botNumber} sonini o‘ylagandim.\n🎁 Sizga ${reward} tanga berildi!`
+        );
+      }
+
+      ctx.session.step = null;
+      ctx.session.botNumber = null;
+
+      return ctx.reply("🔁 Yana o‘ynash uchun menyudan tanlang:", {
+        reply_markup: {
+          keyboard: [
+            [{ text: "🎲 Omadli raqam o'yini" }],
+            [{ text: "🔙 Orqaga" }],
+          ],
+          resize_keyboard: true,
+        },
+      });
     }
 
     if (step === "awaiting_coin_amount") {
