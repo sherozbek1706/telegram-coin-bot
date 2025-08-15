@@ -2550,6 +2550,61 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
       return ctx.reply(`✅ Yuborildi: ${success} ta\n❌ Xatolik: ${failed} ta`);
     }
 
+    if (ctx.session.secretCode) {
+      const guess = text.trim();
+
+      if (!/^\d{4}$/.test(guess)) {
+        return ctx.reply(
+          "❗ <b>Iltimos</b>, faqat <b>4 xonali raqam</b> kiriting.",
+          { parse_mode: "HTML" }
+        );
+      }
+
+      ctx.session.attempts++;
+
+      let correctDigits = 0;
+      let hint = "";
+      for (let i = 0; i < 4; i++) {
+        if (guess[i] === ctx.session.secretCode[i]) {
+          hint += guess[i];
+          correctDigits++;
+        } else {
+          hint += "X";
+        }
+      }
+
+      const rewardCoins = REWARDS_SECRET_CODE_GAME[correctDigits] || 0;
+
+      // ✅ Agar kod to‘liq topilgan bo‘lsa — darhol tugatamiz
+      if (correctDigits === 4) {
+        await db("users")
+          .where({ telegram_id: ctx.from.id })
+          .increment("coins", rewardCoins);
+
+        const user = await db("users")
+          .where({ telegram_id: ctx.from.id })
+          .first();
+
+        ctx.reply(
+          `✅ <b>Tabriklayman!</b> Siz kodni topdingiz: <code>${ctx.session.secretCode}</code>\n💰 Sizga <b>${rewardCoins} tanga</b> qo‘shildi!\nJami tangangiz: <b>${user.coins}</b>`,
+          { parse_mode: "HTML" }
+        );
+
+        console.log(
+          `Foydalanuvchi ${ctx.from.id} (${ctx.from.username}) sirli kodni topdi: ${ctx.session.secretCode}`
+        );
+
+        ctx.session.secretCode = null;
+        ctx.session.attempts = 0;
+        return;
+      }
+
+      // ❌ Agar kod topilmagan bo‘lsa — faqat ma’lumot beramiz
+      ctx.reply(
+        `🔍 <b>${correctDigits}</b> ta raqam o‘rnida to‘g‘ri topdingiz!\n🧩 To‘g‘ri joylar: <code>${hint}</code>\nUrinish: <b>${ctx.session.attempts}</b>/<b>${SECRETGAMEATTEMPS}</b>`,
+        { parse_mode: "HTML" }
+      );
+
     if (!step) return;
 
     if (step === "awaiting_channel") {
