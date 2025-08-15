@@ -2500,11 +2500,55 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
     );
   });
 
+  bot.hears("🎯 Sirli kod o'yini", (ctx) => {
+    console.log("Sirli kod o'yini boshlangan");
+    ctx.session.secretGame = true;
+    ctx.session.secretCode = String(Math.floor(1000 + Math.random() * 9000)); // 4 xonali tasodifiy kod
+    ctx.session.attempts = 0;
+
+    ctx.reply(
+      `Sirli kod o'yini boshlandi! 4 xonali kodni topishga harakat qiling. Sizda ${SECRETGAMEATTEMPS} ta urinish bor.`
+    );
+  });
+
   // Har bir qadamni yakka-yakka tekshiramiz
   bot.on("text", async (ctx) => {
     const step = ctx.session.step;
     const text = ctx.message.text;
     const telegram_id = ctx.from.id;
+
+    if (ctx.session.awaitingBroadcast) {
+      console.log(ctx.session.awaitingBroadcast);
+      ctx.session.awaitingBroadcast = false;
+
+      const users = await db("users").select("telegram_id");
+      let success = 0,
+        failed = 0;
+
+      const BATCH_SIZE = 20;
+      for (let i = 0; i < users.length; i += BATCH_SIZE) {
+        const batch = users.slice(i, i + BATCH_SIZE);
+
+        await Promise.all(
+          batch.map(async (user) => {
+            try {
+              await ctx.telegram.copyMessage(
+                user.telegram_id, // qabul qiluvchi
+                ctx.chat.id, // xabar kelgan chat ID
+                ctx.message.message_id // xabar ID
+              );
+              success++;
+            } catch (err) {
+              failed++;
+            }
+          })
+        );
+
+        await new Promise((res) => setTimeout(res, 500)); // flood control
+      }
+
+      return ctx.reply(`✅ Yuborildi: ${success} ta\n❌ Xatolik: ${failed} ta`);
+    }
 
     if (!step) return;
 
