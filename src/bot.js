@@ -2767,26 +2767,73 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
 
     if (step === "awaiting_coin_amount") {
       const coinAmount = parseInt(ctx.message.text);
+
       if (isNaN(coinAmount) || coinAmount <= 0) {
         return ctx.reply("❌ Tanga soni noto‘g‘ri.");
+      }
+
+      const rate = COIN_TO_CASH_RATE; // tanga -> so‘m kursi
+      const cashPreview = coinAmount * rate;
+
+      // Minimal pul yechish (so'm) sharti
+      const MIN_CASH = 1000;
+      // Minimal tanga yechish (soni)
+      const MIN_COIN = 1000;
+
+      // Agar tanga minimaldan kam bo‘lsa
+      if (coinAmount < MIN_COIN) {
+        return ctx.reply(
+          `⚠️ Minimal yechish miqdori ${MIN_COIN} tanga.\n🎯 O‘yin o‘ynang, bonus oling va ko‘proq pul ishlang!`
+        );
+      }
+
+      // Agar pul 1000 so‘mdan kam bo‘lsa
+      if (cashPreview < MIN_CASH) {
+        // Minimal pulga erishish uchun kerak bo‘ladigan tanga sonini hisoblash
+        const neededCoins = Math.ceil(MIN_CASH / rate);
+        return ctx.reply(
+          `⚠️ Siz ${coinAmount} tanga (${cashPreview} so‘m) yechmoqchisiz.\n` +
+            `💡 Minimal yechish miqdori ${MIN_CASH} so‘m.\n` +
+            `👉 Siz kamida ${
+              neededCoins + 10
+            } tanga yechishingiz kerak bo‘ladi.`
+        );
       }
 
       const user = await db("users")
         .where({ telegram_id: ctx.from.id })
         .first();
+
       if (!user || user.coins < coinAmount) {
         return ctx.reply("❌ Sizda buncha tanga yo‘q.");
       }
 
-      const rate = parseInt(process.env.COIN_TO_CASH_RATE);
-      const cash = coinAmount * rate;
+      // Qoldiq hisoblash
+      const withdrawableAmount =
+        Math.floor(coinAmount / QOLDIQ_BULINSIN) * QOLDIQ_BULINSIN;
+      const remainder = coinAmount - withdrawableAmount;
 
-      ctx.session.coinAmount = coinAmount;
+      if (withdrawableAmount <= 0) {
+        return ctx.reply(
+          `❌ Siz faqat ${QOLDIQ_BULINSIN} birliklarda yecha olasiz.`
+        );
+      }
+
+      if (remainder > 0) {
+        await ctx.reply(
+          `💰 Yechiladigan summa: ${withdrawableAmount} tanga.\n` +
+            `🔹 Qoldiq ${remainder} tanga balansingizda qoladi.`
+        );
+      }
+
+      const cash = withdrawableAmount * rate;
+
+      ctx.session.coinAmount = withdrawableAmount; // faqat yechiladigan miqdor
       ctx.session.cashAmount = cash;
       ctx.session.step = "awaiting_card_number";
 
       return ctx.reply(
-        `💸 ${coinAmount} tanga = ${cash.toLocaleString()} so‘m\n\n💳 Karta raqamingizni yuboring:`
+        `💸 ${withdrawableAmount} tanga = ${cash.toLocaleString()} so‘m\n\n💳 Karta raqamingizni yuboring:`
       );
     }
 
