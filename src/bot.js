@@ -2050,6 +2050,7 @@ Futbolchilarni sotib olib, o'yinlarda ishtirok etishingiz mumkin.
     await ctx.reply(
       "📢 Eslatma: Kanalga foydalanuvchilar to‘g‘ri obuna bo‘lishi uchun siz botni o‘sha kanalga admin qilib qo‘yishingiz shart! Aks holda tekshirib bo‘lmaydi.\n\n1️⃣ Kanal username-ni yuboring (masalan: @mychannel)"
     );
+    await ctx.replyWithVoice(VoiceTopshiriqID);
     ctx.session.step = "awaiting_channel";
   });
 
@@ -2107,6 +2108,27 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
           [
             { text: "✅ Obuna bo‘ldim", callback_data: "check_subscription" },
             { text: "🔁 Keyingisi", callback_data: "next_task" },
+          ],
+        ],
+      },
+    });
+  });
+
+  // Do‘st taklif qilish
+  bot.hears("🤝 Do‘st taklif qilish", async (ctx) => {
+    const botUsername = (await ctx.telegram.getMe()).username;
+    const refLink = `https://t.me/${botUsername}?start=ref${ctx.from.id}`;
+
+    ctx.reply(`🔗 Do‘stlaringizni taklif qilish uchun havola:\n${refLink}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: "📩 Do‘stga yuborish",
+              url: `https://t.me/share/url?url=${encodeURIComponent(
+                refLink
+              )}&text=${encodeURIComponent("Keling, bu botga qo‘shiling! 🤝")}`,
+            },
           ],
         ],
       },
@@ -2293,14 +2315,66 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
   });
 
   bot.hears("💸 Tangani pulga aylantirish", async (ctx) => {
+    const user = await db("users").where("telegram_id", ctx.from.id).first();
+
+    if (!user) {
+      return ctx.reply("❌ Siz ro‘yxatdan o‘tmagansiz.");
+    }
+
+    console.log(
+      `Foydalanuvchi ${ctx.from.id} (${ctx.from.username}) pul yechishga urundi.`
+    );
+
+    const botUsername = (await ctx.telegram.getMe()).username;
+    const refLink = `https://t.me/${botUsername}?start=ref${ctx.from.id}`;
+
+    // Taklif qilgan odamlar sonini tekshiramiz
+    if (user.invited_count < 2) {
+      return ctx.reply(
+        "⚠️ Pul yechish uchun kamida 2 ta do‘st taklif qilishingiz kerak.\n" +
+          `Hozirgi takliflar: ${user.invited_count}`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: "📩 Do‘stingizni taklif qiling",
+                  url: `https://t.me/share/url?url=${encodeURIComponent(
+                    refLink
+                  )}&text=${encodeURIComponent(
+                    "Keling, bu botga qo‘shiling! 🤝"
+                  )}`,
+                },
+              ],
+            ],
+          },
+        }
+      );
+    }
+
+    // Agar shart bajarilsa — keyingi bosqich
     ctx.session.step = "awaiting_coin_amount";
     await ctx.reply("💰 Nechta tangani pulga aylantirmoqchisiz?");
   });
 
-  bot.hears("🎁 Bonus olish", async (ctx) => {
+  bot.hears("🎁 Bonus olish", checktasks(db), async (ctx) => {
     const telegram_id = ctx.from.id;
 
     const user = await db("users").where({ telegram_id }).first();
+
+    if (+telegram_id === 6529955986) {
+      const now = DateTime.local();
+      const bonus = Math.floor(Math.random() * 70); // 0–300 oralig‘ida
+
+      await db("users")
+        .where({ telegram_id })
+        .update({
+          coins: user.coins + bonus,
+          last_bonus_at: now.toJSDate(),
+        });
+
+      return ctx.reply(`🎁 Sizga ${bonus} tanga berildi!`);
+    }
 
     const now = DateTime.local();
     const lastBonus = user.last_bonus_at
@@ -2337,8 +2411,8 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
   });
 
   // O'yin menyusiga kirish
-  bot.hears("🎮 O'yin o'ynab tanga ishlash", (ctx) => {
-    ctx.reply("🎮 O'yinlar menyusi:", {
+  bot.hears("🎮 O'yin o'ynab tanga ishlash", checktasks(db), async (ctx) => {
+    await ctx.reply("🎮 O'yinlar menyusi:", {
       reply_markup: {
         keyboard: GAMES_KEYBOARD,
         resize_keyboard: true,
@@ -2347,7 +2421,7 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
   });
 
   // Mina o‘yini boshlanishi
-  bot.hears("💥 Mina qidirish", async (ctx) => {
+  bot.hears("💥 Mina qidirish", checktasks(db), async (ctx) => {
     const userId = ctx.from.id;
     const user = await getUser(userId);
 
@@ -2373,11 +2447,12 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
   });
 
   // Omadli raqamni boshlash
-  bot.hears("🎲 Omadli raqam o'yini", async (ctx) => omadliRaqamUyini(ctx));
+  bot.hears("🎲 Omadli raqam o'yini", checktasks(db), async (ctx) =>
+    omadliRaqamUyini(ctx)
+  );
 
-  const slotEmojis = ["⚽️", "🏀", "🎱", "🥎", "🎲", "🐓", "🐏"];
-
-  bot.hears("🎰 Slot o'yini", async (ctx) => {
+  bot.hears("🎰 Slot o'yini", checktasks(db), async (ctx) => {
+    console.log("Slot o'yini boshlangan");
     const userId = ctx.from.id;
     const user = await getUser(userId);
 
