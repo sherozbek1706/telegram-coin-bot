@@ -2876,51 +2876,47 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
         "✅ So‘rovingiz qabul qilindi. Tez orada ko‘rib chiqiladi."
       );
     }
-
-    if (step === "guessing_lucky_number") {
-      const userId = telegram_id;
-
-      const guess = parseInt(text);
-
-      if (isNaN(guess) || guess < 1 || guess > 10) {
-        return ctx.reply("❗ Iltimos, 1 dan 10 gacha butun son kiriting.");
-      }
-
-      const botNumber = ctx.session.botNumber;
-      const diff = Math.abs(botNumber - guess);
-
-      let reward = 0;
-
-      if (guess === botNumber) {
-        reward = 50;
-        await updateUserCoins(userId, reward);
-        await ctx.reply(
-          `🎉 Zo'r! To'g'ri topdingiz: ${botNumber}\n💰 Sizga ${reward} tanga qo‘shildi!`
-        );
-      } else {
-        reward = diff;
-        await updateUserCoins(userId, reward);
-        await ctx.reply(
-          `😅 Men ${botNumber} sonini o‘ylagandim.\n🎁 Sizga ${reward} tanga berildi!`
-        );
-      }
-
-      ctx.session.step = null;
-      ctx.session.botNumber = null;
-
-      return omadliRaqamUyini(ctx);
-
-      return ctx.reply("🔁 Yana o‘ynash uchun menyudan tanlang:", {
-        reply_markup: {
-          keyboard: [
-            [{ text: "🎲 Omadli raqam o'yini" }],
-            [{ text: "🔙 Orqaga" }],
-          ],
-          resize_keyboard: true,
-        },
-      });
-    }
   });
+
+  bot.on("callback_query", async (ctx) => {
+    const callbackData = ctx.callbackQuery.data;
+    const telegram_id = ctx.from.id;
+    const data = ctx.callbackQuery.data;
+
+    if (data.startsWith("buy_worker_")) {
+      const workerId = parseInt(data.split("_")[2]);
+      const worker = await db("workers").where({ id: workerId }).first();
+
+      if (!worker) {
+        return ctx.answerCbQuery("❌ Ishchi topilmadi.");
+      }
+
+      const user = await db("users")
+        .where({ telegram_id: ctx.from.id })
+        .first();
+
+      if (!user) {
+        return ctx.answerCbQuery("❌ Foydalanuvchi topilmadi.");
+      }
+
+      if (user.coins < worker.price) {
+        return ctx.answerCbQuery("💰 Tangangiz yetarli emas!", {
+          show_alert: true,
+        });
+      }
+
+      // Pul yechish
+      await db("users")
+        .where({ telegram_id: ctx.from.id })
+        .update({ coins: user.coins - worker.price });
+
+      // Foydalanuvchiga ishchi qo'shish
+      await db("user_workers").insert({
+        user_id: user.telegram_id, // Eslatma: bu yer user.id bo’lsa kerak
+        worker_id: worker.id,
+        quantity: 1,
+        last_collected: new Date().toISOString(),
+      });
 
   bot.on("callback_query", async (ctx) => {
     const callbackData = ctx.callbackQuery.data;
