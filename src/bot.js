@@ -2918,9 +2918,9 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
         last_collected: new Date().toISOString(),
       });
 
-  bot.on("callback_query", async (ctx) => {
-    const callbackData = ctx.callbackQuery.data;
-    const telegram_id = ctx.from.id;
+      ctx.answerCbQuery(`✅ ${worker.name} sotib olindi!`);
+      ctx.reply(`🎉 Siz ${worker.name} ishchisini sotib oldingiz!`);
+    }
 
     if (callbackData === "check_subscription") {
       const task = ctx.session.currentTask;
@@ -2989,8 +2989,6 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
       }
     }
 
-    const data = ctx.callbackQuery.data;
-
     if (!data.startsWith("approve_") && !data.startsWith("reject_")) {
       return;
     }
@@ -3034,7 +3032,7 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
 
       await ctx.telegram.sendMessage(
         request.telegram_id,
-        `❌ So‘rovingiz rad etildi. ${request.coins} tanga hisobingizga qaytarildi.`
+        `❌ So‘rovingiz rad etildi. ${request.coins} tanga hisobingizga qaytarildi. \n Sababini bilish uchun admin bilan bog‘laning: @sherozbek_17`
       );
 
       await ctx.editMessageText(`❌ So‘rov ID ${request.id} rad etildi.`);
@@ -3070,6 +3068,4 @@ Agar bu topshiriq sizga to‘g‘ri kelmasa, "🔁 Keyingisi" tugmasini bosing.
       );
     }
   });
-
-  // Qo‘shimcha komandalar joyi (keyingi bosqichlarda to‘ldiramiz)
 };
